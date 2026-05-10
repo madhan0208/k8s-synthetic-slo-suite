@@ -1,263 +1,149 @@
-\# k8s-synthetic-slo-suite
-
-
+# k8s-synthetic-slo-suite
 
 Kubernetes Observability Platform using OpenTelemetry — built for thesis research on distributed tracing, metrics, and log correlation across microservices.
 
+## What This Project Does
 
+Two microservices run on a local Kubernetes cluster (Kind). Both are instrumented with OpenTelemetry SDKs. They send traces, metrics, and logs through a two-tier OTel Collector pipeline (Agent + Gateway) to Jaeger (traces) and Prometheus + Grafana (metrics).
 
-\## What This Project Does
+## Architecture
 
-
-
-Two microservices run on a local Kubernetes cluster (Kind). Both are instrumented with OpenTelemetry SDKs. They send traces, metrics, and logs through a two-tier OTel Collector pipeline (Agent + Gateway) to observability backends (Jaeger, Elastic, or Datadog).
-
-
-
-The goal is to evaluate how well OpenTelemetry abstracts backend differences — same instrumentation, swap the exporter, compare results.
-
-
-
-\## Architecture
-
-Client (curl)
-
+Client (curl/PowerShell)
 |
-
 v
-
 order-service (Python/Flask, port 8080)
-
 |  --> sends telemetry to OTel Agent
-
-|  --> calls inventory-service
-
+|  --> calls inventory-service via HTTP
 v
-
 inventory-service (Python/Flask, port 8081)
-
 |  --> sends telemetry to OTel Agent
-
 v
-
-OTel Agent (DaemonSet, one per node)
-
-|  --> forwards to gateway
-
+OTel Agent (DaemonSet, one per K8s node)
+|  --> forwards to Gateway
 v
-
-OTel Gateway (Deployment, 2 replicas)
-
-|  --> exports to backend
-
+OTel Gateway (Deployment)
+|  --> traces to Jaeger
+|  --> metrics to Prometheus
 v
-
-Jaeger / Elastic / Datadog
-
-
-
-
-
+Jaeger (trace UI, port 16686)
+Prometheus (metric storage, port 9090)
+Grafana (dashboards, port 3000)
 
 ## Project Structure
 
+
 k8s-synthetic-slo-suite/
-
 ├── apps/
-
-│   ├── order-service/          # Python Flask app — creates orders
-
-│   │   ├── app.py
-
+│   ├── order-service/
+│   │   ├── app.py              # Flask app with OTel instrumentation
 │   │   ├── requirements.txt
-
 │   │   └── Dockerfile
-
-│   └── inventory-service/      # Python Flask app — checks stock
-
-│       ├── app.py
-
+│   └── inventory-service/
+│       ├── app.py              # Flask app with OTel instrumentation
 │       ├── requirements.txt
-
 │       └── Dockerfile
-
 ├── k8s/
-
-│   ├── otel-rbac.yaml          # ServiceAccount + ClusterRole for collector
-
-│   ├── otel-collector-agent.yaml    # DaemonSet — one agent per node
-
-│   ├── otel-collector-gateway.yaml  # Deployment — centralized gateway
-
+│   ├── otel-rbac.yaml          # ServiceAccount + RBAC for collector
+│   ├── otel-collector-agent.yaml    # DaemonSet agent
+│   ├── otel-collector-gateway.yaml  # Deployment gateway
+│   ├── jaeger.yaml             # Jaeger all-in-one
+│   ├── prometheus.yaml         # Lightweight Prometheus
+│   ├── grafana.yaml            # Grafana
 │   └── apps/
-
-│       ├── order-deploy.yaml        # K8s Deployment + Service
-
-│       └── inventory-deploy.yaml    # K8s Deployment + Service
-
-├── kind-config.yaml            # Kind cluster config (1 control-plane + 3 workers)
-
+│       ├── order-deploy.yaml
+│       └── inventory-deploy.yaml
+├── docs/
+│   ├── architecture.md         # System design documentation
+│   ├── telemetry-mvs.md        # Telemetry Minimum Standard
+│   └── chaos-experiments.md    # Chaos engineering results
+├── kind-config.yaml            # Kind cluster (1 control-plane + 2 workers)
 └── README.md
-
-
-
 
 
 ## Tech Stack
 
+- Kubernetes (Kind, 3 nodes)
+- OpenTelemetry Collector Contrib 0.100.0
+- OpenTelemetry Python SDK 1.25.0
+- Flask 3.0.0
+- Jaeger 1.57
+- Prometheus 2.52.0
+- Grafana 10.4.0
 
+## Quick Start
 
-\- \*\*Kubernetes\*\* — Kind (local cluster with 4 nodes)
+### Prerequisites
+- Docker Desktop (6 GB+ memory)
+- kubectl
+- Kind
+- Helm (optional)
 
-\- \*\*OpenTelemetry Collector\*\* — Agent (DaemonSet) + Gateway (Deployment)
-
-\- \*\*OpenTelemetry SDK\*\* — Python SDK for traces, metrics, logs
-
-\- \*\*Flask\*\* — HTTP framework for both microservices
-
-\- \*\*OTLP\*\* — Wire protocol between apps and collector (gRPC, port 4317)
-
-\- \*\*Backends\*\* — Jaeger (traces), Prometheus + Grafana (metrics), Elastic, Datadog
-
-
-
-\## Prerequisites
-
-
-
-\- Docker Desktop
-
-\- kubectl
-
-\- Kind
-
-\- Helm
-
-
-
-\## Quick Start
-
-
-
-\### 1. Create the cluster
-
-
-
+### 1. Create cluster
 ```bash
-
 kind create cluster --name otel-thesis --config kind-config.yaml
-
 kubectl create namespace observability
-
 kubectl create namespace apps
-
 ```
 
-
-
-\### 2. Deploy OTel Collector
-
-
-
+### 2. Deploy observability stack
 ```bash
-
 kubectl apply -f k8s/otel-rbac.yaml
-
 kubectl apply -f k8s/otel-collector-agent.yaml
-
 kubectl apply -f k8s/otel-collector-gateway.yaml
-
+kubectl apply -f k8s/jaeger.yaml
+kubectl apply -f k8s/prometheus.yaml
+kubectl apply -f k8s/grafana.yaml
 ```
 
-
-
-\### 3. Build and load app images
-
-
-
+### 3. Build and deploy apps
 ```bash
-
 docker build -t order-service:1.0.0 apps/order-service/
-
 docker build -t inventory-service:1.0.0 apps/inventory-service/
-
 kind load docker-image order-service:1.0.0 --name otel-thesis
-
 kind load docker-image inventory-service:1.0.0 --name otel-thesis
-
-```
-
-
-
-\### 4. Deploy apps
-
-
-
-```bash
-
 kubectl apply -f k8s/apps/order-deploy.yaml
-
 kubectl apply -f k8s/apps/inventory-deploy.yaml
-
 ```
 
-
-
-\### 5. Test
-
-
-
+### 4. Test
 ```bash
-
 kubectl port-forward -n apps svc/order-service 8080:8080
-
 curl -X POST http://localhost:8080/orders -H "Content-Type: application/json" -d '{"itemId":"sku-123","qty":2}'
-
 ```
 
-
-
-\### 6. Verify telemetry
-
-
-
+### 5. Access dashboards
 ```bash
-
-kubectl logs -n observability -l app=otel-gateway --tail=20
-
+kubectl port-forward -n observability svc/jaeger-query 16686:16686    # Jaeger
+kubectl port-forward -n observability svc/grafana 3000:3000           # Grafana (admin/thesis2026)
+kubectl port-forward -n observability svc/prometheus 9090:9090        # Prometheus
 ```
 
+## Chaos Experiments
 
+Three experiments validate the observability pipeline:
 
-\## What's Next
+1. **Pod kill** — Delete inventory pods, observe error traces in Jaeger and error metrics in Grafana
+2. **CPU throttling** — Limit inventory CPU to 1%, observe latency increase in traces
+3. **Collector failure** — Kill OTel agents, confirm apps keep running (non-blocking SDK)
 
+Results documented in docs/chaos-experiments.md
 
+## Thesis Context
 
-\- Install Jaeger for trace visualization
+This project supports a master's thesis on Kubernetes observability using OpenTelemetry standards. Key findings:
 
-\- Add Elastic (ECK) and Datadog backends
+- OTel enables vendor-neutral instrumentation (same code, swap backends via config)
+- Two-tier collector (Agent + Gateway) provides fault tolerance and sampling flexibility
+- OTel SDKs are non-blocking — collector failure does not impact application availability
+- Distributed traces across services are connected via W3C TraceContext propagation
 
-\- Backend comparison for thesis evaluation
+## Future Work
 
-\- Chaos engineering experiments
+- Add Elasticsearch/Kibana backend for multi-backend comparison
+- Add Datadog SaaS backend
+- Implement tail sampling on gateway
+- Add SLO-based burn-rate alerting
+- Add Go or Node.js service for cross-language trace propagation
 
-\- SLO-based alerting with burn-rate alerts
-
-\- Telemetry Minimum Standard (MVS) document
-
-
-
-\## Thesis Context
-
-
-
-This project supports a master's thesis on Kubernetes observability using OpenTelemetry standards. The research evaluates vendor-neutral telemetry pipelines by deploying the same instrumented services against multiple backends and comparing setup complexity, cost, trace quality, and operational overhead.
-
-
-
-\## License
-
-
-
+## License
 MIT
-

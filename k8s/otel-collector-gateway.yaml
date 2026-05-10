@@ -18,18 +18,22 @@ data:
         check_interval: 1s
         limit_mib: 512
     exporters:
-      debug:
-        verbosity: detailed
+      otlp/jaeger:
+        endpoint: jaeger-collector.observability:4317
+        tls:
+          insecure: true
+      prometheus:
+        endpoint: 0.0.0.0:8889
     service:
       pipelines:
         traces:
           receivers: [otlp]
           processors: [memory_limiter, batch]
-          exporters: [debug]
+          exporters: [otlp/jaeger]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, batch]
-          exporters: [debug]
+          exporters: [prometheus]
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -37,7 +41,7 @@ metadata:
   name: otel-gateway
   namespace: observability
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: otel-gateway
@@ -52,6 +56,7 @@ spec:
           args: ["--config=/etc/otel/config.yaml"]
           ports:
             - containerPort: 4317
+            - containerPort: 8889
           resources:
             requests:
               cpu: 250m
@@ -78,3 +83,5 @@ spec:
   ports:
     - name: grpc
       port: 4317
+    - name: metrics
+      port: 8889
